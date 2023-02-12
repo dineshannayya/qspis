@@ -37,12 +37,12 @@
 ////                                                              ////
 //////////////////////////////////////////////////////////////////////
 
-module spi2wb(
+module qspis_wb(
 
              //spis_if Interface
              input  logic         reg_wr          , // write request
              input  logic         reg_rd          , // read request
-             input  logic [31:0]  reg_addr        , // address
+             input  logic [23:0]  reg_addr        , // address
              input  logic  [3:0]  reg_be          , // Byte enable
              input  logic [31:0]  reg_wdata       , // write data
              output logic  [31:0] reg_rdata       , // read data
@@ -65,7 +65,7 @@ module spi2wb(
 
 assign wbm_cyc_o = reg_wr | reg_rd;
 assign wbm_stb_o = reg_wr | reg_rd;
-assign wbm_adr_o = reg_addr;
+assign wbm_adr_o = {4'b0,reg_addr};
 assign wbm_we_o  = reg_wr;
 assign wbm_sel_o = reg_be;
 assign wbm_dat_o = reg_wdata;

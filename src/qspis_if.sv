@@ -125,6 +125,7 @@ logic [1:0] cfg_spi_dmode      ; // Data Transmit Mode
 logic       cfg_wren           ; // Allow Write
 logic       dummy_enb          ; // Insert Dummy cycle
 logic       addr_inc           ; // Increment address by 4
+logic [3:0] sdin_l             ;
 
 
 wire cmd_phase     = (spi_if_st == S_CMD );
@@ -140,17 +141,24 @@ logic     sck_l0,sck_l1,sck_l2;
 
 wire sck_pdetect = (!sck_l2 && sck_l1) ? 1'b1: 1'b0;
 wire sck_ndetect = (sck_l2 && !sck_l1) ? 1'b1: 1'b0;
+reg  sck_pdetect_d;
+reg  sck_ndetect_d;
+
 
 always @ (posedge sys_clk or negedge rst_n) begin
 if (!rst_n) begin
       sck_l0 <= 1'b1;
       sck_l1 <= 1'b1;
       sck_l2 <= 1'b1;
+      sck_pdetect_d <= 1'b0;
+      sck_ndetect_d <= 1'b0;
    end
    else begin
       sck_l0 <= sclk;
       sck_l1 <= sck_l0; // double sync
       sck_l2 <= sck_l1;
+      sck_pdetect_d <= sck_pdetect;
+      sck_ndetect_d <= sck_ndetect;
    end
 end
 
@@ -171,6 +179,13 @@ if (!rst_n) begin
 end
 
 
+// Latch the Input at scl low phase
+always_latch begin
+   if(sclk == 0)
+      sdin_l <= sdin;
+end
+
+
 //command register accumation
 assign reg_be = 4'hF; // Need to cross-check Dinesh?
 
@@ -179,7 +194,7 @@ begin
   if (!rst_n)
      cmd_reg[7:0] <= 8'b0;
   else if (cmd_phase & (sck_pdetect))
-     cmd_reg[7:0] <= {cmd_reg[6:0], sdin[0]};
+     cmd_reg[7:0] <= {cmd_reg[6:0], sdin_l[0]};
 end
 
 
@@ -190,10 +205,10 @@ begin
      reg_addr[23:0] <= 24'b0;
   else if (adr_phase & (sck_pdetect)) begin
      case(cfg_spi_amode) // address mode
-     P_SINGLE: reg_addr[23:0] <= {reg_addr[22:0], sdin[0]};
-     P_DUAL:   reg_addr[23:0] <= {reg_addr[21:0], sdin[1:0]};
-     P_QUAD:   reg_addr[23:0] <= {reg_addr[19:0], sdin[3:0]};
-     default:  reg_addr[23:0] <= {reg_addr[22:0], sdin[0]};
+     P_SINGLE: reg_addr[23:0] <= {reg_addr[22:0], sdin_l[0]};
+     P_DUAL:   reg_addr[23:0] <= {reg_addr[21:0], sdin_l[1:0]};
+     P_QUAD:   reg_addr[23:0] <= {reg_addr[19:0], sdin_l[3:0]};
+     default:  reg_addr[23:0] <= {reg_addr[22:0], sdin_l[0]};
      endcase
    end else if(addr_inc) begin
       reg_addr[23:0] <= reg_addr+4;
@@ -208,10 +223,10 @@ begin
      reg_wdata[31:0] <= 32'b0;
   else if (wr_phase & (sck_pdetect)) begin
      case(cfg_spi_dmode) // data mode
-     P_SINGLE:  reg_wdata[31:0] <= {reg_wdata[30:0], sdin[0]};
-     P_DUAL:    reg_wdata[31:0] <= {reg_wdata[29:0], sdin[1:0]};
-     P_QUAD:    reg_wdata[31:0] <= {reg_wdata[28:0], sdin[3:0]};
-     default:   reg_wdata[31:0] <= {reg_wdata[30:0], sdin[0]};
+     P_SINGLE:  reg_wdata[31:0] <= {reg_wdata[30:0], sdin_l[0]};
+     P_DUAL:    reg_wdata[31:0] <= {reg_wdata[29:0], sdin_l[1:0]};
+     P_QUAD:    reg_wdata[31:0] <= {reg_wdata[28:0], sdin_l[3:0]};
+     default:   reg_wdata[31:0] <= {reg_wdata[30:0], sdin_l[0]};
      endcase
    end
 end
@@ -298,7 +313,7 @@ begin
           S_CMD  : begin // Command State
              if (ssn_ss == 1'b1) begin
                 spi_if_st <= S_IDLE;
-            end else if (sck_ndetect) begin
+            end else if (sck_pdetect_d) begin
                 if(bitcnt   == 6'b0)  begin
     	            case(cmd_reg)
     	            C_WREN: begin // 0x06 Write Enable
@@ -429,7 +444,7 @@ begin
              reg_rd       <= 1'b0;
              if (ssn_ss == 1'b1) begin
                 spi_if_st <= S_IDLE;
-             end else if (sck_ndetect) begin
+             end else if (sck_pdetect_d) begin
                 if (bitcnt   == 6'b0) begin
                    bitcnt    <= 6'b0;
                    if(dummy_enb) begin
@@ -461,7 +476,7 @@ begin
           S_DUMMY : begin // Address Phase
              if (ssn_ss == 1'b1) begin
                 spi_if_st <= S_IDLE;
-             end else if (sck_ndetect) begin
+             end else if (sck_pdetect_d) begin
                 if (bitcnt   == 6'b00) begin
                    case(cfg_spi_dmode) // data mode
                    P_SINGLE: bitcnt       <= 6'b011111;
@@ -481,15 +496,16 @@ begin
           end
 
           S_WRITE   : begin // Write State
-	         if(reg_ack) begin
+             if (ssn_ss == 1'b1) begin
+                reg_wr    <= 0;
+                addr_inc  <= 0;
+                spi_if_st <= S_IDLE;
+	         end else if(reg_ack) begin
                  reg_wr       <= 0;
                  addr_inc     <= 1;
-             end else begin
-                 addr_inc     <= 0;
-             end
-             if (ssn_ss == 1'b1) begin
-                spi_if_st <= S_IDLE;
-             end else if (sck_ndetect) begin
+             end else if (sck_pdetect_d) begin
+                reg_wr       <= 0;
+                addr_inc     <= 0;
                 if (bitcnt   == 6'b0) begin
                    reg_wr     <= 1;
                    case(cfg_spi_dmode) // data mode
@@ -499,21 +515,25 @@ begin
                    default:  bitcnt       <= 6'b011111;
                    endcase
                 end else begin
+                    reg_wr       <= 0;
+                    addr_inc     <= 0;
                     bitcnt       <= bitcnt  -1;
                 end
+             end else begin
+                 addr_inc     <= 0;
              end
           end
 
           S_READ : begin // Send Data to SPI 
-	         if(reg_ack) begin
+             if (ssn_ss == 1'b1) begin
+                reg_rd    <= 0;
+                addr_inc  <= 0;
+                spi_if_st <= S_IDLE;
+	         end else if(reg_ack) begin
                  reg_rd       <= 0;
                  addr_inc     <= 1;
-             end else begin
-                 addr_inc     <= 0;
-             end
-             if (ssn_ss == 1'b1) begin
-                spi_if_st <= S_IDLE;
-             end else if (sck_pdetect) begin
+             end else if (sck_pdetect_d) begin
+                addr_inc     <= 0;
                 if (bitcnt   == 6'b0) begin
                    reg_rd     <= 1;
                    sdout_oen  <= 1'b0;
@@ -524,8 +544,11 @@ begin
                    default:  bitcnt       <= 6'b011111;
                    endcase
                 end else begin
+                    addr_inc     <= 0;
                     bitcnt       <= bitcnt  -1;
                 end
+             end else begin
+                 addr_inc     <= 0;
              end
           end
           S_EXIT : begin // Wait for SSN = 1

@@ -38,8 +38,8 @@
 
 module qspis_top (
 
-	 input  logic         sys_clk         ,
-	 input  logic         rst_n           ,
+	     input  logic         sys_clk         ,
+	     input  logic         rst_n           ,
 
          input  logic         sclk            ,
          input  logic         ssn             ,
@@ -65,7 +65,7 @@ module qspis_top (
 
 logic         reg_wr          ; // write request
 logic         reg_rd          ; // read request
-logic [31:0]  reg_addr        ; // address
+logic [23:0]  reg_addr        ; // address
 logic [3:0]   reg_be          ; // Byte enable
 logic [31:0]  reg_wdata       ; // write data
 logic [31:0]  reg_rdata       ; // read data
